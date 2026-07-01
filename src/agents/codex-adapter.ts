@@ -14,14 +14,33 @@ import { run, runStream, binaryAvailable } from "./spawn.ts";
  * NOTE: requires an authenticated `codex` CLI; real runs may incur cost. Prefer
  * the mock adapter until the user authorises real runs.
  */
+// GPT-5.5 API list price (USD per 1M tokens, verified 2026-07). Codex on a
+// ChatGPT plan bills in credits, not dollars — this powers an "≈$" estimate.
+const PRICE = { input: 5.0, cachedInput: 0.5, output: 30.0 };
+
+/** Estimated cost from a codex usage event (API list-price equivalent). */
+function estimateUsd(u: { input_tokens?: number; cached_input_tokens?: number; output_tokens?: number; reasoning_output_tokens?: number }): number {
+  const cached = u.cached_input_tokens ?? 0;
+  const fresh = Math.max(0, (u.input_tokens ?? 0) - cached);
+  const out = (u.output_tokens ?? 0) + (u.reasoning_output_tokens ?? 0);
+  return (fresh * PRICE.input + cached * PRICE.cachedInput + out * PRICE.output) / 1e6;
+}
+
 export class CodexCliAdapter implements AgentAdapter {
   readonly kind = "codex" as const;
   readonly id = "codex";
   readonly displayName: string;
   private model?: string;
-  constructor(model?: string) {
+  private fast: boolean;
+  constructor(model?: string, opts?: { fast?: boolean }) {
     this.model = model;
-    this.displayName = `Codex CLI (${model ?? "default"})`;
+    this.fast = opts?.fast ?? false;
+    this.displayName = `Codex CLI (${model ?? "default"}${this.fast ? ", fast" : ""})`;
+  }
+
+  /** Fast mode (official: service_tier=fast + features.fast_mode) — 1.5x speed, 2.5x credits on GPT-5.5. */
+  private fastArgs(): string[] {
+    return this.fast ? ["-c", 'service_tier="fast"', "--enable", "fast_mode"] : [];
   }
 
   async available() {
@@ -39,7 +58,7 @@ export class CodexCliAdapter implements AgentAdapter {
     const tmp = mkdtempSync(join(tmpdir(), "umem-codex-"));
     try {
       const lastMsg = join(tmp, "last.txt");
-      const args = ["exec", "--json", "--skip-git-repo-check", "-s", "read-only", "--output-last-message", lastMsg];
+      const args = ["exec", "--json", "--skip-git-repo-check", "-s", "read-only", "--output-last-message", lastMsg, ...this.fastArgs()];
       const model = opts.model ?? this.model;
       if (model) args.push("-m", model);
       if (opts.workdir) args.push("-C", opts.workdir);
@@ -48,7 +67,7 @@ export class CodexCliAdapter implements AgentAdapter {
 
       const parts: string[] = [];
       let live = ""; // in-flight partial of the current message (item.updated)
-      let tokens: number | undefined;
+      let usage: any;
       let turnError = "";
       const text = () => [...parts, live].filter(Boolean).join("\n\n");
       onUpdate({ text: "", status: "连接中…" });
@@ -73,7 +92,7 @@ export class CodexCliAdapter implements AgentAdapter {
             turnError = JSON.stringify(ev.error ?? ev).slice(0, 300);
           }
           const u = ev?.msg?.usage ?? ev?.usage ?? ev?.token_usage;
-          if (u) tokens = (u.input_tokens ?? 0) + (u.output_tokens ?? 0);
+          if (u) usage = u;
         },
       });
       const fileText = existsSync(lastMsg) ? readFileSync(lastMsg, "utf-8").trim() : "";
@@ -81,7 +100,10 @@ export class CodexCliAdapter implements AgentAdapter {
       if (!finalText) {
         throw new Error(`codex exited ${r.code}${r.timedOut ? " (timeout)" : ""}: ${turnError || r.stderr.slice(0, 400) || "(no diagnostic output)"}`);
       }
-      return { text: finalText, cost: { tokens }, adapter: this.id, model, raw: { stderrTail: r.stderr.slice(-200) } };
+      const cost = usage
+        ? { tokens: (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0), usd: estimateUsd(usage), estimated: true }
+        : undefined;
+      return { text: finalText, cost, adapter: this.id, model, raw: { stderrTail: r.stderr.slice(-200), usage } };
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
@@ -92,7 +114,7 @@ export class CodexCliAdapter implements AgentAdapter {
     try {
       const lastMsg = join(tmp, "last.txt");
       const sandbox = (opts as any).sandbox ?? "read-only";
-      const args = ["exec", "--json", "--skip-git-repo-check", "-s", sandbox, "--output-last-message", lastMsg];
+      const args = ["exec", "--json", "--skip-git-repo-check", "-s", sandbox, "--output-last-message", lastMsg, ...this.fastArgs()];
       const model = opts.model ?? this.model;
       if (model) args.push("-m", model);
       if (opts.workdir) args.push("-C", opts.workdir);
@@ -130,17 +152,20 @@ export class CodexCliAdapter implements AgentAdapter {
         try { json = JSON.parse(text); } catch { json = undefined; }
       }
       // best-effort token usage from the JSONL event stream
-      let tokens: number | undefined;
+      let usage: any;
       for (const line of r.stdout.split("\n")) {
-        const t = line.trim();
-        if (!t.startsWith("{")) continue;
+        const t2 = line.trim();
+        if (!t2.startsWith("{")) continue;
         try {
-          const ev = JSON.parse(t);
+          const ev = JSON.parse(t2);
           const u = ev?.msg?.usage ?? ev?.usage ?? ev?.token_usage;
-          if (u) tokens = (u.input_tokens ?? 0) + (u.output_tokens ?? 0);
+          if (u) usage = u;
         } catch { /* ignore */ }
       }
-      return { text, json, cost: { tokens }, adapter: this.id, model, raw: { stderrTail: r.stderr.slice(-200) } };
+      const cost = usage
+        ? { tokens: (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0), usd: estimateUsd(usage), estimated: true }
+        : undefined;
+      return { text, json, cost, adapter: this.id, model, raw: { stderrTail: r.stderr.slice(-200), usage } };
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

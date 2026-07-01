@@ -30,7 +30,7 @@ alias umem='node --experimental-strip-types --no-warnings src/cli/index.ts'
 
 ## ccc — ask both, side by side
 
-The fastest way to use the two agents: `ccc` sends one question to Claude Code and Codex **in parallel** (each on its own CLI default model — nothing is forced) and **streams** both answers into two live-updating panels — Claude arrives token by token (`stream-json` deltas), Codex per message chunk — then prints a full final render. Panel titles show `model · effort`. The adversarial council is off by default.
+The fastest way to use the two agents: `ccc` sends one question to Claude Code and Codex **in parallel** and **streams** both answers into two live-updating panels — Claude arrives token by token (`stream-json` deltas), Codex per message chunk — then prints a full final render. Panel titles show `model · effort`. Defaults: Claude runs `claude-fable-5` in normal (non-plan) permission mode; Codex runs its config.toml default model with **fast mode** on (`service_tier=fast`, 1.5x speed / 2.5x credits; `--no-fast` to disable). Codex cost shows as `≈$` — an API list-price conversion, since ChatGPT plans bill in credits. The adversarial council is off by default.
 
 ```bash
 npm link                 # installs `ccc` (and `umem`) into your global bin

@@ -32,12 +32,17 @@ FLAGS
   --council                 also run cross-review + synthesis (costs more, slower)
   --mock                    offline mock adapters (free; for layout testing)
   --no-stream               wait for full answers instead of live streaming
+  --no-fast                 disable Codex fast mode (fast = 1.5x speed, 2.5x credits)
   --timeout <seconds>       per-agent timeout (default 300)
   --config <path>           config file (default: repo config.json chain)
   --help                    this help
 
-Models: none are forced — claude uses its own default (settings.json), codex its
-own default (config.toml). Set agents.<name>.model in config to override.`;
+Models: claude defaults to claude-fable-5 (permission-mode default, no plan);
+codex uses its own config.toml default with fast mode ON. Codex cost is shown
+as ≈$ (API list-price conversion — a ChatGPT plan actually bills in credits).
+Set agents.<name>.model in config to override either model.`;
+
+const CCC_CLAUDE_DEFAULT_MODEL = "claude-fable-5";
 
 // ---- default model/effort discovery (for the panel titles) ----
 interface CliDefaults { model: string; effort: string; }
@@ -61,13 +66,14 @@ interface SideResult {
   text: string;
   seconds: number;
   costUsd?: number;
+  costEstimated?: boolean;
   tokens?: number;
   actualModel?: string;
 }
 
 function footerOf(s: SideResult): string {
   const parts = [`⏱ ${s.seconds.toFixed(1)}s`];
-  if (s.costUsd != null) parts.push(`$${s.costUsd.toFixed(3)}`);
+  if (s.costUsd != null) parts.push(`${s.costEstimated ? "≈" : ""}$${s.costUsd.toFixed(3)}`);
   if (s.tokens != null) parts.push(`${(s.tokens / 1000).toFixed(1)}k tokens`);
   return parts.join(" · ");
 }
@@ -106,13 +112,16 @@ async function askStream(adapter: AgentAdapter, question: string, workdir: strin
       if (u.model) side.model = u.model;
       side.status = u.status ?? (u.text ? "生成中…" : side.status);
     };
+    // permissionMode "default": a plain Q&A must not run in plan mode (plan
+    // injects planning behavior and Claude narrates it in the answer).
+    const callOpts = { workdir, timeoutMs, permissionMode: "default" };
     const r: CompleteResult = useStream
-      ? await adapter.stream!(question, { workdir, timeoutMs }, onU)
-      : await adapter.complete(question, { workdir, timeoutMs });
+      ? await adapter.stream!(question, callOpts, onU)
+      : await adapter.complete(question, callOpts);
     const raw: any = r.raw;
     const mu = raw && typeof raw === "object" ? raw.modelUsage : undefined;
     const actualModel = r.model ?? (mu && typeof mu === "object" ? Object.keys(mu)[0] : undefined);
-    const res: SideResult = { ok: true, text: r.text.trim() || "(空回答)", seconds: (Date.now() - t0) / 1000, costUsd: r.cost?.usd, tokens: r.cost?.tokens, actualModel };
+    const res: SideResult = { ok: true, text: r.text.trim() || "(空回答)", seconds: (Date.now() - t0) / 1000, costUsd: r.cost?.usd, costEstimated: r.cost?.estimated, tokens: r.cost?.tokens, actualModel };
     side.text = res.text; side.done = true; side.status = "完成 ✓"; side.res = res;
     return res;
   } catch (e: any) {
@@ -122,15 +131,18 @@ async function askStream(adapter: AgentAdapter, question: string, workdir: strin
   }
 }
 
-async function runOnce(question: string, cfg: Config, opts: { mock: boolean; council: boolean; noStream: boolean; timeoutMs: number }): Promise<void> {
+async function runOnce(question: string, cfg: Config, opts: { mock: boolean; council: boolean; noStream: boolean; noFast: boolean; timeoutMs: number }): Promise<void> {
   const cd = claudeDefaults(cfg.claudeHome);
   const xd = codexDefaults();
-  const claude: AgentAdapter = opts.mock ? new MockAdapter("claude") : new ClaudeCliAdapter(cfg.agents.claude.model);
-  const codex: AgentAdapter = opts.mock ? new MockAdapter("codex") : new CodexCliAdapter(cfg.agents.codex.model);
-  const cBase = opts.mock ? "Claude · mock" : `Claude · ${cfg.agents.claude.model ?? cd.model} · effort ${cd.effort}`;
-  const xBase = opts.mock ? "Codex · mock" : `Codex · ${cfg.agents.codex.model ?? xd.model} · effort ${xd.effort}`;
+  const cModel = cfg.agents.claude.model ?? CCC_CLAUDE_DEFAULT_MODEL;
+  const fast = !opts.noFast;
+  const claude: AgentAdapter = opts.mock ? new MockAdapter("claude") : new ClaudeCliAdapter(cModel);
+  const codex: AgentAdapter = opts.mock ? new MockAdapter("codex") : new CodexCliAdapter(cfg.agents.codex.model, { fast });
+  const fastTag = fast ? " · fast" : "";
+  const cBase = opts.mock ? "Claude · mock" : `Claude · ${cModel} · effort ${cd.effort}`;
+  const xBase = opts.mock ? "Codex · mock" : `Codex · ${cfg.agents.codex.model ?? xd.model} · effort ${xd.effort}${fastTag}`;
   const cTitleOf = (m?: string) => (m && !opts.mock ? `Claude · ${m} · effort ${cd.effort}` : cBase);
-  const xTitleOf = (m?: string) => (m && !opts.mock ? `Codex · ${m} · effort ${xd.effort}` : xBase);
+  const xTitleOf = (m?: string) => (m && !opts.mock ? `Codex · ${m} · effort ${xd.effort}${fastTag}` : xBase);
 
   // both agents answer from an empty scratch dir so codex doesn't wander a repo
   const scratch = mkdtempSync(join(tmpdir(), "ccc-"));
@@ -211,7 +223,7 @@ async function runOnce(question: string, cfg: Config, opts: { mock: boolean; cou
 
 async function main() {
   const argv = process.argv.slice(2);
-  const flags = { mock: false, council: false, noStream: false, timeoutMs: 300000, config: undefined as string | undefined };
+  const flags = { mock: false, council: false, noStream: false, noFast: false, timeoutMs: 300000, config: undefined as string | undefined };
   const positional: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
@@ -219,6 +231,7 @@ async function main() {
     else if (a === "--mock") flags.mock = true;
     else if (a === "--council") flags.council = true;
     else if (a === "--no-stream") flags.noStream = true;
+    else if (a === "--no-fast") flags.noFast = true;
     else if (a === "--timeout") flags.timeoutMs = parseInt(argv[++i] ?? "300", 10) * 1000;
     else if (a === "--config") flags.config = argv[++i];
     else positional.push(a);
@@ -235,7 +248,7 @@ async function main() {
   const xd = codexDefaults();
   const sub = flags.mock
     ? "mock 模式(离线免费)"
-    : `Claude ${cfg.agents.claude.model ?? cd.model} ‖ Codex ${cfg.agents.codex.model ?? xd.model}${flags.council ? " · council 开" : ""}`;
+    : `Claude ${cfg.agents.claude.model ?? CCC_CLAUDE_DEFAULT_MODEL} ‖ Codex ${cfg.agents.codex.model ?? xd.model}${flags.noFast ? "" : " · fast"}${flags.council ? " · council 开" : ""}`;
   console.log();
   console.log(banner(sub, process.stdout.columns || 100));
   console.log();

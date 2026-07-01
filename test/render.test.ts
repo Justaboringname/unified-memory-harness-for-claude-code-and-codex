@@ -9,6 +9,21 @@ test("dispWidth: CJK counts 2 columns, latin 1", () => {
   assert.equal(dispWidth("\x1b[1m中\x1b[0m"), 2, "ANSI stripped before measuring");
 });
 
+test("dispWidth: emoji count 2 columns, joiners/selectors 0", () => {
+  assert.equal(dispWidth("👋"), 2);
+  assert.equal(dispWidth("🔍"), 2);
+  assert.equal(dispWidth("✅"), 2, "BMP emoji-presentation");
+  assert.equal(dispWidth("⭐"), 2);
+  assert.equal(dispWidth("👋🏻"), 2, "skin-tone modifier is zero-width");
+  assert.equal(dispWidth("你好!👋"), 7, "2+2+1+2");
+  assert.equal(dispWidth("⏱"), 1, "text-presentation symbol stays narrow");
+});
+
+test("renderPanel rows stay aligned with emoji in the body", () => {
+  const rows = renderPanel({ title: "T", body: "你好!👋 我可以帮你:\n- 🔍 理解代码 / 调查问题\n- ✅ 验证修复" }, 40);
+  for (const r of rows) assert.equal(dispWidth(stripAnsi(r)), 40, `row "${stripAnsi(r)}"`);
+});
+
 test("wrapDisplay: respects display width for mixed CJK/latin", () => {
   const lines = wrapDisplay("计算机科学里的 NP 问题 complexity theory", 10);
   for (const l of lines) assert.ok(dispWidth(l) <= 10, `"${l}" is ${dispWidth(l)} cols`);
