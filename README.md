@@ -28,6 +28,20 @@ Requires Node ≥ 22.6 (uses native TypeScript type-stripping — no build step)
 alias umem='node --experimental-strip-types --no-warnings src/cli/index.ts'
 ```
 
+## ccc — ask both, side by side
+
+The fastest way to use the two agents: `ccc` sends one question to Claude Code and Codex **in parallel** (each on its own CLI default model — nothing is forced) and renders the two answers side by side, with `model · effort` in each panel title. The adversarial council is off by default.
+
+```bash
+npm link                 # installs `ccc` (and `umem`) into your global bin
+ccc 计算机的N和NP是什么意思？        # one-shot, two columns
+ccc                      # interactive loop
+ccc --council "..."      # additionally run cross-review + synthesis
+ccc --mock "..."         # offline/free layout test
+```
+
+Every Q&A is recorded to the audit trail (`tasks` mode `qa` + `agent_runs`).
+
 ## Quick start
 
 ```bash

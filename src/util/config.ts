@@ -34,8 +34,10 @@ const DEFAULTS: Config = {
   claudeHome: "~/.claude",
   claudeProjects: [],
   agents: {
-    claude: { adapter: "mock", model: "claude-opus-4-8", enabled: true },
-    codex: { adapter: "mock", model: "gpt-5-codex", enabled: true },
+    // No `model` by default: real adapters then omit --model/-m and inherit
+    // each CLI's own default (claude: settings.json; codex: config.toml).
+    claude: { adapter: "mock", enabled: true },
+    codex: { adapter: "mock", enabled: true },
   },
   redaction: { enabled: true },
 };
