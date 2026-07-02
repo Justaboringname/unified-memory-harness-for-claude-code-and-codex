@@ -10,9 +10,9 @@
 // Both agents run on their OWN CLI default model (no --model / -m is passed).
 // The adversarial council is OFF by default (--council). --mock is offline.
 // ============================================================================
-import { readFileSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir, homedir } from "node:os";
-import { join, dirname } from "node:path";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { loadConfig, type Config } from "../util/config.ts";
@@ -24,30 +24,29 @@ import { banner, readBoxedLine } from "./prompt-box.ts";
 import { openDb } from "../db/db.ts";
 import { nowIso } from "../util/time.ts";
 
-const HELP = `ccc — Claude Code as the kernel, Codex answering alongside
+const HELP = `ccc — own two-column UI, Claude Code as the engine
 
-USAGE (kernel mode — default)
-  ccc [question]            launch the REAL Claude Code TUI in this workspace;
-                            every question you ask is ALSO sent to Codex
-                            (read-only, fast mode) and both answers are shown
-  ccc -p "<question>"       kernel mode, one-shot print (no TUI)
-
-USAGE (panels mode — standalone two-column renderer)
-  ccc --panels [question]   the original side-by-side streaming panels
-  ccc --mock [question]     offline mock panels (free; implies --panels)
+USAGE
+  ccc                       prompt-box REPL: both answers stream side by side;
+                            workspace-aware; BOTH sides keep session context
+                            across questions (claude --resume / codex resume)
+  ccc <question>            one-shot, two streaming columns
+  ccc --tui [question]      swap the UI for the real Claude Code TUI instead
+  ccc -p "<question>"       one-shot markdown print, no UI (via the TUI kernel)
 
 FLAGS
   --no-fast                 disable Codex fast mode (fast = 1.5x speed, 2.5x credits)
-  --council                 (panels mode) also run cross-review + synthesis
-  --no-stream               (panels mode) wait for full answers, no live streaming
-  --timeout <seconds>       (panels mode) per-agent timeout (default 300)
+  --council                 also run cross-review + synthesis after the answers
+  --no-stream               wait for full answers, no live streaming
+  --mock                    offline mock adapters (free; for layout testing)
+  --timeout <seconds>       per-agent timeout (default 300)
   --config <path>           config file (default: repo config.json chain)
   --help                    this help
 
-Kernel mode IS Claude Code: real workspace, tools, permissions, sessions —
-with a dual-answer orchestrator injected (Codex runs sandboxed read-only in
-your cwd). Claude model defaults to claude-fable-5; codex uses its config.toml
-default. Codex cost in panels mode shows as ≈$ (API list-price conversion).`;
+Engine: the Claude side runs on the Claude Code harness (headless, in YOUR
+cwd — CLAUDE.md, read tools, session resume all apply), defaulting to
+claude-fable-5. Codex runs read-only in the same cwd with fast mode ON.
+Codex cost shows as ≈$ (API list-price conversion; plans bill in credits).`;
 
 const CCC_CLAUDE_DEFAULT_MODEL = "claude-fable-5";
 
@@ -100,6 +99,7 @@ interface SideResult {
   costEstimated?: boolean;
   tokens?: number;
   actualModel?: string;
+  sessionId?: string;
 }
 
 function footerOf(s: SideResult): string {
@@ -134,7 +134,10 @@ function record(cfg: Config, question: string, claude: SideResult, codex: SideRe
 // ---- live-streaming state per side ----
 interface LiveSide { text: string; status: string; done: boolean; model?: string; res?: SideResult; }
 
-async function askStream(adapter: AgentAdapter, question: string, workdir: string, timeoutMs: number, side: LiveSide): Promise<SideResult> {
+/** Session ids carried across REPL turns — this is what makes follow-ups work. */
+export interface Sessions { claude?: string; codex?: string; }
+
+async function askStream(adapter: AgentAdapter, question: string, workdir: string, timeoutMs: number, side: LiveSide, resume?: string): Promise<SideResult> {
   const t0 = Date.now();
   try {
     const useStream = typeof adapter.stream === "function";
@@ -145,14 +148,14 @@ async function askStream(adapter: AgentAdapter, question: string, workdir: strin
     };
     // permissionMode "default": a plain Q&A must not run in plan mode (plan
     // injects planning behavior and Claude narrates it in the answer).
-    const callOpts = { workdir, timeoutMs, permissionMode: "default" };
+    const callOpts = { workdir, timeoutMs, permissionMode: "default", resume };
     const r: CompleteResult = useStream
       ? await adapter.stream!(question, callOpts, onU)
       : await adapter.complete(question, callOpts);
     const raw: any = r.raw;
     const mu = raw && typeof raw === "object" ? raw.modelUsage : undefined;
     const actualModel = r.model ?? (mu && typeof mu === "object" ? Object.keys(mu)[0] : undefined);
-    const res: SideResult = { ok: true, text: r.text.trim() || "(空回答)", seconds: (Date.now() - t0) / 1000, costUsd: r.cost?.usd, costEstimated: r.cost?.estimated, tokens: r.cost?.tokens, actualModel };
+    const res: SideResult = { ok: true, text: r.text.trim() || "(空回答)", seconds: (Date.now() - t0) / 1000, costUsd: r.cost?.usd, costEstimated: r.cost?.estimated, tokens: r.cost?.tokens, actualModel, sessionId: r.sessionId };
     side.text = res.text; side.done = true; side.status = "完成 ✓"; side.res = res;
     return res;
   } catch (e: any) {
@@ -162,7 +165,7 @@ async function askStream(adapter: AgentAdapter, question: string, workdir: strin
   }
 }
 
-async function runOnce(question: string, cfg: Config, opts: { mock: boolean; council: boolean; noStream: boolean; noFast: boolean; timeoutMs: number }): Promise<void> {
+async function runOnce(question: string, cfg: Config, opts: { mock: boolean; council: boolean; noStream: boolean; noFast: boolean; timeoutMs: number }, sessions: Sessions = {}): Promise<void> {
   const cd = claudeDefaults(cfg.claudeHome);
   const xd = codexDefaults();
   const cModel = cfg.agents.claude.model ?? CCC_CLAUDE_DEFAULT_MODEL;
@@ -175,8 +178,9 @@ async function runOnce(question: string, cfg: Config, opts: { mock: boolean; cou
   const cTitleOf = (m?: string) => (m && !opts.mock ? `Claude · ${m} · effort ${cd.effort}` : cBase);
   const xTitleOf = (m?: string) => (m && !opts.mock ? `Codex · ${m} · effort ${xd.effort}${fastTag}` : xBase);
 
-  // both agents answer from an empty scratch dir so codex doesn't wander a repo
-  const scratch = mkdtempSync(join(tmpdir(), "ccc-"));
+  // engine runs in the REAL working directory: Claude gets its harness context
+  // (CLAUDE.md, read tools), Codex reads the same workspace (read-only sandbox)
+  const workdir = process.cwd();
   const live = process.stdout.isTTY && !opts.noStream;
   const c: LiveSide = { text: "", status: "排队中…", done: false };
   const x: LiveSide = { text: "", status: "排队中…", done: false };
@@ -213,11 +217,13 @@ async function runOnce(question: string, cfg: Config, opts: { mock: boolean; cou
   }
 
   const [cRes, xRes] = await Promise.all([
-    askStream(claude, question, scratch, opts.timeoutMs, c),
-    askStream(codex, question, scratch, opts.timeoutMs, x),
+    askStream(claude, question, workdir, opts.timeoutMs, c, sessions.claude),
+    askStream(codex, question, workdir, opts.timeoutMs, x, sessions.codex),
   ]);
   if (timer) clearInterval(timer);
-  rmSync(scratch, { recursive: true, force: true });
+  // carry the session ids forward: follow-up questions keep full context
+  if (cRes.sessionId) sessions.claude = cRes.sessionId;
+  if (xRes.sessionId) sessions.codex = xRes.sessionId;
 
   // replace the live tail view with the FULL final render
   if (live && prevH > 0) process.stdout.write(`\r\x1b[${prevH - 1}A\x1b[0J`);
@@ -254,14 +260,15 @@ async function runOnce(question: string, cfg: Config, opts: { mock: boolean; cou
 
 async function main() {
   const argv = process.argv.slice(2);
-  const flags = { mock: false, council: false, noStream: false, noFast: false, panels: false, print: false, timeoutMs: 300000, config: undefined as string | undefined };
+  const flags = { mock: false, council: false, noStream: false, noFast: false, tui: false, print: false, timeoutMs: 300000, config: undefined as string | undefined };
   const positional: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (a === "--help" || a === "-h") { console.log(HELP); return; }
-    else if (a === "--mock") { flags.mock = true; flags.panels = true; }
-    else if (a === "--panels") flags.panels = true;
-    else if (a === "-p" || a === "--print") flags.print = true;
+    else if (a === "--mock") flags.mock = true;
+    else if (a === "--tui") flags.tui = true;
+    else if (a === "-p" || a === "--print") { flags.print = true; flags.tui = true; }
+    else if (a === "--panels") { /* legacy alias for the (now default) own UI */ }
     else if (a === "--council") flags.council = true;
     else if (a === "--no-stream") flags.noStream = true;
     else if (a === "--no-fast") flags.noFast = true;
@@ -272,14 +279,16 @@ async function main() {
   const cfg = loadConfig(flags.config);
   const question = positional.join(" ").trim();
 
-  // kernel mode (default): the real Claude Code harness IS the UI
-  if (!flags.panels) {
+  // --tui / -p: hand the terminal to the real Claude Code TUI (kernel-hosted UI)
+  if (flags.tui) {
     if (flags.print && !question) { console.error('用法:ccc -p "<问题>"'); process.exit(1); }
     runKernel(question, cfg, { print: flags.print, noFast: flags.noFast });
   }
 
+  // default: OWN UI, Claude Code as the engine; sessions persist across turns
+  const sessions: Sessions = {};
   if (question) {
-    await runOnce(question, cfg, flags);
+    await runOnce(question, cfg, flags, sessions);
     return;
   }
   // interactive TUI loop — Claude-Code-style banner + bordered input box
@@ -287,14 +296,14 @@ async function main() {
   const xd = codexDefaults();
   const sub = flags.mock
     ? "mock 模式(离线免费)"
-    : `Claude ${cfg.agents.claude.model ?? CCC_CLAUDE_DEFAULT_MODEL} ‖ Codex ${cfg.agents.codex.model ?? xd.model}${flags.noFast ? "" : " · fast"}${flags.council ? " · council 开" : ""}`;
+    : `Claude ${cfg.agents.claude.model ?? CCC_CLAUDE_DEFAULT_MODEL} ‖ Codex ${cfg.agents.codex.model ?? xd.model}${flags.noFast ? "" : " · fast"} · 工作区 ${basename(process.cwd())} · 会话连续${flags.council ? " · council 开" : ""}`;
   console.log();
   console.log(banner(sub, process.stdout.columns || 100));
   console.log();
   for (;;) {
-    const q = await readBoxedLine("问点什么", "例如:计算机的 N 和 NP 是什么意思?");
+    const q = await readBoxedLine("问点什么", "追问会带上下文(两侧会话连续)");
     if (q === null) break;
-    await runOnce(q, cfg, flags);
+    await runOnce(q, cfg, flags, sessions);
   }
   console.log(`${ANSI.dim}再见 👋${ANSI.reset}`);
 }

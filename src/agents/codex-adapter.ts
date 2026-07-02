@@ -58,16 +58,23 @@ export class CodexCliAdapter implements AgentAdapter {
     const tmp = mkdtempSync(join(tmpdir(), "umem-codex-"));
     try {
       const lastMsg = join(tmp, "last.txt");
-      const args = ["exec", "--json", "--skip-git-repo-check", "-s", "read-only", "--output-last-message", lastMsg, ...this.fastArgs()];
       const model = opts.model ?? this.model;
-      if (model) args.push("-m", model);
-      if (opts.workdir) args.push("-C", opts.workdir);
+      // `exec resume <id>` continues a prior thread; it does NOT accept -s/-m/-C
+      // (sandbox, model, and cwd are pinned by the original session).
+      const args = opts.resume
+        ? ["exec", "resume", opts.resume, "--json", "--skip-git-repo-check", "--output-last-message", lastMsg, ...this.fastArgs()]
+        : ["exec", "--json", "--skip-git-repo-check", "-s", "read-only", "--output-last-message", lastMsg, ...this.fastArgs()];
+      if (!opts.resume) {
+        if (model) args.push("-m", model);
+        if (opts.workdir) args.push("-C", opts.workdir);
+      }
       const fullPrompt = opts.systemPrompt ? `${opts.systemPrompt}\n\n${prompt}` : prompt;
       args.push("-");
 
       const parts: string[] = [];
       let live = ""; // in-flight partial of the current message (item.updated)
       let usage: any;
+      let threadId: string | undefined;
       let turnError = "";
       const text = () => [...parts, live].filter(Boolean).join("\n\n");
       onUpdate({ text: "", status: "连接中…" });
@@ -79,6 +86,7 @@ export class CodexCliAdapter implements AgentAdapter {
           if (!line.startsWith("{")) return;
           let ev: any;
           try { ev = JSON.parse(line); } catch { return; }
+          if (ev?.type === "thread.started" && ev.thread_id) threadId = ev.thread_id;
           const item = ev?.item;
           if (item?.type === "agent_message" && typeof item.text === "string") {
             if (ev.type === "item.completed") { parts.push(item.text); live = ""; onUpdate({ text: text() }); }
@@ -103,7 +111,7 @@ export class CodexCliAdapter implements AgentAdapter {
       const cost = usage
         ? { tokens: (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0), usd: estimateUsd(usage), estimated: true }
         : undefined;
-      return { text: finalText, cost, adapter: this.id, model, raw: { stderrTail: r.stderr.slice(-200), usage } };
+      return { text: finalText, cost, adapter: this.id, model, sessionId: threadId ?? opts.resume, raw: { stderrTail: r.stderr.slice(-200), usage } };
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

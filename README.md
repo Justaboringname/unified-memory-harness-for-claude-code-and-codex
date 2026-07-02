@@ -28,27 +28,24 @@ Requires Node ≥ 22.6 (uses native TypeScript type-stripping — no build step)
 alias umem='node --experimental-strip-types --no-warnings src/cli/index.ts'
 ```
 
-## ccc — Claude Code as the kernel, Codex answering alongside
+## ccc — own two-column UI, Claude Code as the engine
 
-`ccc` launches the **real Claude Code TUI** as its kernel — real workspace, tools, permissions, sessions — with a dual-answer orchestrator injected: every question you ask is answered by Claude normally **and** independently by Codex (spawned read-only in your cwd, fast mode), whose answer is appended verbatim under its own heading. No cross-review unless you ask.
+`ccc` keeps its **own UI** — a bordered prompt-box REPL and two live-streaming answer panels (Claude per-token via `stream-json` deltas, Codex per message chunk, `model · effort` titles, live tail view, full final render) — while the **engine underneath is the Claude Code harness**:
+
+- both sides run in **your real working directory** — Claude gets its normal harness context (CLAUDE.md, read tools), Codex reads the same workspace in a read-only sandbox;
+- **sessions persist across REPL turns** on BOTH sides (`claude -p --resume <session_id>` / `codex exec resume <thread_id>`), so follow-up questions keep full context — verified end-to-end (a code word set in turn 1 is recalled by both models in turn 2).
 
 ```bash
 npm link                 # installs `ccc` (and `umem`) into your global bin
-ccc                      # kernel mode: real Claude Code TUI + Codex alongside
-ccc "这个 repo 的构建流程是怎样的?"   # kernel mode, seeded first question (workspace-aware)
-ccc -p "什么是 DNS?"      # kernel mode, one-shot print (no TUI)
+ccc                      # prompt-box REPL: two streaming columns, session continuity
+ccc "这个 repo 的构建流程是怎样的?"   # one-shot, workspace-aware
+ccc --council "..."      # additionally run cross-review + synthesis
+ccc --mock "..."         # offline/free layout test
+ccc --tui                # optional: hand the terminal to the real Claude Code TUI
+ccc -p "什么是 DNS?"      # one-shot markdown print via the TUI kernel (no UI)
 ```
 
-The original standalone renderer survives as **panels mode** — two live-streaming columns (Claude per-token via `stream-json` deltas, Codex per message chunk), `model · effort` titles, live tail view, full final render:
-
-```bash
-ccc --panels "计算机的N和NP是什么意思？"   # two live streaming columns
-ccc --panels             # bordered prompt-box REPL
-ccc --mock "..."         # offline/free layout test (implies --panels)
-ccc --panels --council "..."   # additionally run cross-review + synthesis
-```
-
-Defaults in both modes: Claude `claude-fable-5`; Codex its config.toml default model with **fast mode** on (`service_tier=fast`, 1.5x speed / 2.5x credits; `--no-fast` to disable). In panels mode Codex cost shows as `≈$` — an API list-price conversion, since ChatGPT plans bill in credits.
+Defaults: Claude `claude-fable-5` (permission-mode `default`, no plan narration); Codex its config.toml default model with **fast mode** on (`service_tier=fast`, 1.5x speed / 2.5x credits; `--no-fast` to disable). Codex cost shows as `≈$` — an API list-price conversion, since ChatGPT plans bill in credits. Note: `codex exec resume` does not accept `-s`/`-m`/`-C` — sandbox, model, and cwd stay pinned by the original session.
 
 Every Q&A is recorded to the audit trail (`tasks` mode `qa` + `agent_runs`).
 

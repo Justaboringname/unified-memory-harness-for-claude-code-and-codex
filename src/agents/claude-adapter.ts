@@ -39,6 +39,7 @@ export class ClaudeCliAdapter implements AgentAdapter {
       "--output-format", "stream-json", "--include-partial-messages",
       "--permission-mode", opts.permissionMode ?? "plan",
     ];
+    if (opts.resume) args.push("--resume", opts.resume); // continue the prior session (harness keeps context)
     const model = opts.model ?? this.model;
     if (model) args.push("--model", model);
     if (opts.systemPrompt) args.push("--append-system-prompt", opts.systemPrompt);
@@ -82,7 +83,7 @@ export class ClaudeCliAdapter implements AgentAdapter {
     const cost = envelope
       ? { usd: envelope.total_cost_usd ?? undefined, tokens: envelope.usage ? (envelope.usage.input_tokens ?? 0) + (envelope.usage.output_tokens ?? 0) : undefined }
       : undefined;
-    return { text: finalText, cost, adapter: this.id, model: actualModel ?? model, raw: envelope };
+    return { text: finalText, cost, adapter: this.id, model: actualModel ?? model, sessionId: envelope?.session_id ?? opts.resume, raw: envelope };
   }
 
   async complete(prompt: string, opts: CompleteOpts = {}): Promise<CompleteResult> {
