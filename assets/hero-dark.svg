@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="420" viewBox="0 0 1280 420" role="img" aria-labelledby="t">
+<title id="t">unified-memory: Claude exports, CLAUDE.md files and Claude Code sessions are indexed into one local SQLite store with FTS5 search, served over a Memory MCP server to Claude and Codex, which review each other. Agents may only propose memories.</title>
+<style>
+.sans { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.tx { fill: #ecece8; }
+.mu { fill: #9b9a94; }
+.clay { fill: #d97757; }
+.sage { fill: #9bb07c; }
+.eyebrow { font-size: 22px; letter-spacing: 4px; }
+.title { font-weight: 700; letter-spacing: -1.5px; }
+.tag { font-size: 28px; }
+.node { font-size: 24px; font-weight: 600; }
+.sub { font-size: 22px; }
+.cap { font-size: 22px; }
+.small { font-size: 20px; }
+.num { font-variant-numeric: tabular-nums; }
+</style>
+<rect x="0.5" y="0.5" width="1279" height="419" rx="20" fill="#181818" stroke="#2f2f2f" stroke-width="1"/>
+<text class="mono eyebrow mu" x="72" y="104">CLAUDE CODE &amp; CODEX</text>
+<text class="sans title tx" x="68" y="190" style="font-size:76px">unified-memory</text>
+<text class="sans tag mu" x="72" y="250">Local-first memory over MCP.</text>
+<text class="sans tag mu" x="72" y="290">Claude and Codex, side by side.</text>
+<text class="sans tag mu" x="72" y="330">One writer per workspace.</text>
+<g fill="none" stroke="#5a5955" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+<path d="M816 132 C831.0 132 831.0 210 846 210 H858"/>
+<path d="M816 210 C831.0 210 831.0 210 846 210 H858"/>
+<path d="M816 288 C831.0 288 831.0 210 846 210 H858"/>
+<path d="M1028 210 H1044 C1070.0 210 1070.0 140 1096 140"/>
+<path d="M1028 210 H1044 C1070.0 210 1070.0 280 1096 280"/>
+</g>
+<line x1="1130" y1="164.0" x2="1130" y2="256.0" stroke="#9bb07c" stroke-width="2" stroke-dasharray="3 6" stroke-linecap="round"/>
+<circle cx="668" cy="132" r="5" fill="#9bb07c"/>
+<text class="mono cap mu" x="682" y="139">export</text>
+<circle cx="668" cy="210" r="5" fill="#9bb07c"/>
+<text class="mono cap mu" x="682" y="217">CLAUDE.md</text>
+<circle cx="668" cy="288" r="5" fill="#9bb07c"/>
+<text class="mono cap mu" x="682" y="295">sessions</text>
+<rect x="858" y="160.0" width="170" height="100" rx="14" fill="#212121" stroke="#333332" stroke-width="1.5"/>
+<circle cx="880" cy="192.0" r="5" fill="#d97757"/>
+<text class="sans node tx" x="894" y="200.0">SQLite</text>
+<text class="sans sub mu" x="894" y="232.0">FTS5 + MCP</text>
+<text class="mono cap clay" x="860" y="298.0">propose-only</text>
+<rect x="1096" y="116.0" width="132" height="48" rx="12" fill="#212121" stroke="#333332" stroke-width="1.5"/>
+<circle cx="1118" cy="140.0" r="5" fill="#9bb07c"/>
+<text class="sans node tx" x="1132" y="148.0">Claude</text>
+<rect x="1096" y="256.0" width="132" height="48" rx="12" fill="#212121" stroke="#333332" stroke-width="1.5"/>
+<circle cx="1118" cy="280.0" r="5" fill="#9bb07c"/>
+<text class="sans node tx" x="1132" y="288.0">Codex</text>
+<text class="mono cap sage" x="1144" y="217">review</text>
+</svg>
