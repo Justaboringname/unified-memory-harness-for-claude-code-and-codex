@@ -19,7 +19,7 @@
 1. **Unified memory layer.** Indexes your Claude web/account export *and* your local Claude Code assets (`CLAUDE.md`, auto-memory, session transcripts) into one searchable, provenance-tracked SQLite store, plus a typed/versioned derived-memory layer. Exposed to agents via a **Memory MCP server**.
 2. **Collaboration scheduler.** Drives **Claude and Codex** to answer the same question: independent analysis → cross-review → synthesis, with structural guarantees (single-writer workspace lease) and full auditability.
 
-> **Status:** runnable vertical slice, 40 tests. The deterministic spine (schema, streaming importer, search, Memory MCP, council orchestrator, demo) is complete and tested. The Memory MCP server is verified booting as a **real stdio subprocess**, and both the Claude and Codex adapters plus a **full real dual-agent council** have been run end-to-end against the live CLIs (see [Real agents](#real-agents-authentication)). Adapters still default to **mock** so the demo/tests stay offline and free. `builder-reviewer` / `tournament` modes ship as documented interfaces on top of the working single-writer lease (see [Task modes](#task-modes)).
+> **Status:** runnable vertical slice, 60 tests. The deterministic spine (schema, streaming importer, search, Memory MCP, council orchestrator, demo) is complete and tested. The Memory MCP server is verified booting as a **real stdio subprocess**, and both the Claude and Codex adapters plus a **full real dual-agent council** have been run end-to-end against the live CLIs (see [Real agents](#real-agents-authentication)). Adapters still default to **mock** so the demo/tests stay offline and free. `builder-reviewer` / `tournament` modes ship as documented interfaces on top of the working single-writer lease (see [Task modes](#task-modes)).
 
 ## Why two components
 
@@ -30,7 +30,7 @@ This is not "sync Claude memory to GPT". The memory layer decides **what knowled
 ```bash
 npm install                       # better-sqlite3, stream-json, @modelcontextprotocol/sdk, zod
 cp config.example.json config.json   # edit paths (config.json is gitignored)
-npm test                          # 31 tests, offline
+npm test                          # 60 tests, offline
 node --experimental-strip-types src/cli/index.ts demo   # offline end-to-end demo
 ```
 
@@ -185,14 +185,14 @@ src/mcp/        Memory MCP server (7 tools)
 src/agents/     protocol types + Claude/Codex/mock adapters
 src/orchestrator/  council flow + structural write-lease
 src/cli/        umem CLI + offline demo
-test/           31 node:test tests (synthetic fixtures only)
+test/           60 node:test tests (synthetic fixtures only)
 docs/           ADRs + architecture + inventory report
 fixtures/       synthetic (fake) test data
 ```
 
 ## Tests
 
-`npm test` runs 39 tests. All use **synthetic data**; no real content in fixtures.
+`npm test` runs 60 tests. All use **synthetic data**; no real content in fixtures.
 
 | Area | Covered |
 |:--|:--|
@@ -203,6 +203,7 @@ fixtures/       synthetic (fake) test data
 | Lease | single-writer + crash reclaim |
 | Council | flow, resume, adapter-failure tolerance |
 | MCP server | propose-only, protection, provenance |
+| `ccc` TUI | CJK/emoji display width, input box and panel layout, streaming output |
 
 The code was hardened by an **adversarial multi-agent review** (5 dimensions × independent verify): 10 confirmed findings fixed, each with a regression test in `test/fixes.test.ts`:
 
